@@ -1,8 +1,9 @@
 ﻿using UnityEngine;
 
-[RequireComponent(typeof(BoxCollider2D))]
+[RequireComponent(typeof(CapsuleCollider2D))]
 public class CharacterController2D : MonoBehaviour
 {
+
     [SerializeField, Tooltip("Max speed, in units per second, that the character moves.")]
     float speed = 9;
 
@@ -18,9 +19,15 @@ public class CharacterController2D : MonoBehaviour
     [SerializeField, Tooltip("Max height the character will jump regardless of gravity")]
     float jumpHeight = 4;
 
-    private BoxCollider2D boxCollider;
 
+    //private BoxCollider2D boxCollider;
+    private CapsuleCollider2D capsuleCollider;
     private Vector2 velocity;
+    private float moveInput = 0;
+    private bool jump = false;
+    private bool doubleJump = true;
+
+    private bool facingRight = true;
 
     /// <summary>
     /// Set to true when the character intersects a collider beneath
@@ -29,24 +36,34 @@ public class CharacterController2D : MonoBehaviour
     private bool grounded;
 
     private void Awake()
-    {      
-        boxCollider = GetComponent<BoxCollider2D>();
+    {
+        capsuleCollider = GetComponent<CapsuleCollider2D>();
     }
 
     private void Update()
     {
-        // Use GetAxisRaw to ensure our input is either 0, 1 or -1.
-        float moveInput = Input.GetAxisRaw("Horizontal");
+        moveInput = Input.GetAxisRaw("Horizontal");
+        jump = jump ? true : Input.GetButtonDown("Jump");
+    }
 
+    private void FixedUpdate()
+    {
         if (grounded)
-        {
-            velocity.y = 0;
-
-            if (Input.GetButtonDown("Jump"))
+        {   
+            velocity.y = 0;    
+            
+            if (jump) 
             {
                 // Calculate the velocity required to achieve the target jump height.
                 velocity.y = Mathf.Sqrt(2 * jumpHeight * Mathf.Abs(Physics2D.gravity.y));
+                jump = false;
             }
+        }
+        else if (doubleJump && jump)
+        {
+            velocity.y = Mathf.Sqrt(2 * jumpHeight * Mathf.Abs(Physics2D.gravity.y));
+            jump = false;
+            doubleJump = false;
         }
 
         float acceleration = grounded ? walkAcceleration : airAcceleration;
@@ -54,43 +71,60 @@ public class CharacterController2D : MonoBehaviour
 
         if (moveInput != 0)
         {
-            velocity.x = Mathf.MoveTowards(velocity.x, speed * moveInput, acceleration * Time.deltaTime);
+            velocity.x = Mathf.MoveTowards(velocity.x, speed * moveInput, acceleration * Time.fixedDeltaTime);
         }
         else
         {
-            velocity.x = Mathf.MoveTowards(velocity.x, 0, deceleration * Time.deltaTime);
+            velocity.x = Mathf.MoveTowards(velocity.x, 0, deceleration * Time.fixedDeltaTime);
         }
 
-        velocity.y += Physics2D.gravity.y * Time.deltaTime;
+        velocity.y += Physics2D.gravity.y * Time.fixedDeltaTime;
 
-        transform.Translate(velocity * Time.deltaTime);
+        transform.Translate(velocity * Time.fixedDeltaTime);
 
         grounded = false;
 
         // Retrieve all colliders we have intersected after velocity has been applied.
-        Collider2D[] hits = Physics2D.OverlapBoxAll(transform.position, boxCollider.size, 0);
+        Collider2D[] hits = Physics2D.OverlapCapsuleAll(transform.position, capsuleCollider.size, CapsuleDirection2D.Vertical, 0);
 
         foreach (Collider2D hit in hits)
         {
             // Ignore our own collider.
-            if (hit == boxCollider)
+            if (hit == capsuleCollider || hit.isTrigger)
                 continue;
 
-            ColliderDistance2D colliderDistance = hit.Distance(boxCollider);
-
+            ColliderDistance2D colliderDistance = hit.Distance(capsuleCollider);
+            
+            
             // Ensure that we are still overlapping this collider.
             // The overlap may no longer exist due to another intersected collider
             // pushing us out of this one.
             if (colliderDistance.isOverlapped)
             {
                 transform.Translate(colliderDistance.pointA - colliderDistance.pointB);
+                velocity += (colliderDistance.pointA - colliderDistance.pointB)/Time.fixedDeltaTime;
 
                 // If we intersect an object beneath us, set grounded to true. 
-                if (Vector2.Angle(colliderDistance.normal, Vector2.up) < 90 && velocity.y < 0)
+                if (Vector2.Angle(colliderDistance.normal, Vector2.up) < 90 && velocity.y < 0.01f)
                 {
+                    
                     grounded = true;
+                    doubleJump = true;
                 }
             }
         }
+
+        if (velocity.x > 0.01f && !facingRight)
+        {
+            transform.localScale = new Vector3(transform.localScale.x * -1, transform.localScale.y, transform.localScale.z);
+            facingRight = true;
+        }
+        else if (velocity.x < -0.01f && facingRight)
+        {
+            transform.localScale = new Vector3(transform.localScale.x * -1, transform.localScale.y, transform.localScale.z);
+            facingRight = false;
+        }
+
+        jump = false;
     }
 }
